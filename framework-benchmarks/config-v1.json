@@ -1,5 +1,14 @@
 {
   "java_executable": "/opt/boot27/bin/java",
   "jdk_build": "27+35-2325",
-  "jvm": ["-Xms16m", "-Xmx80m", "-XX:+UseG1GC", "-Duser.timezone=UTC"]
+  "jvm": [
+    "-Xms16m",
+    "-Xmx80m",
+    "-XX:+UseG1GC",
+    "-Duser.timezone=UTC",
+    "-XX:TrimNativeHeapInterval=10000",
+    "-XX:MinHeapFreeRatio=5",
+    "-XX:MaxHeapFreeRatio=10",
+    "-XX:G1PeriodicGCInterval=10000"
+  ]
 }
