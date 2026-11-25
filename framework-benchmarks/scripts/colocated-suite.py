@@ -326,6 +326,28 @@ def display(value):
     return escape(f'{value:.2f}' if isinstance(value, float) else str(value))
 
 
+def print_summary(suite, report_path):
+    rows = [('Stack', 'Round', 'Status', 'Ready (s)', 'Peak RSS (MiB)',
+             'Sustained p99 (ms)', 'Min guest MemAvailable (MiB)')]
+    for candidate in suite['candidates']:
+        phases = candidate['phases']
+        values = [phases[phase].get(metric) if candidate['compatible']
+                  and phases[phase]['status'] == 'completed' else None
+                  for phase, metric in (('startup', 'ready_seconds'), ('sustained', 'app_rss_mib'),
+                                        ('sustained', 'p99_ms'), ('sustained', 'available_mib'))]
+        rows.append((LABELS[candidate['id']], str(candidate.get('round', '-')), candidate['status'],
+                     *(f'{value:.2f}' if value is not None else '-' for value in values)))
+    widths = [max(map(len, column)) for column in zip(*rows)]
+    print(f"\nSuite status: {suite['status']}")
+    for index, row in enumerate(rows):
+        cells = [cell.ljust(width) if column < 3 else cell.rjust(width)
+                 for column, (cell, width) in enumerate(zip(row, widths))]
+        print(' | '.join(cells))
+        if index == 0:
+            print('-+-'.join('-' * width for width in widths))
+    print(f'Report: {report_path}')
+
+
 def chart(candidates, phase, key, title):
     rows = [c['phases'][phase] for c in candidates]
     values = [row.get(key) if row['status'] == 'completed' and candidate['compatible'] else None
@@ -720,6 +742,7 @@ def run_suite(output, bundles, vm, guest_root, preparation=False, version='3.4-m
         signal.signal(signal.SIGTERM, previous)
         persist(manifest, suite)
         result = regenerate(manifest, refresh=True)
+        print_summary(result, manifest.with_name('report.html'))
     return result['status'] != 'completed'
 
 

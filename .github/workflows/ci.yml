@@ -141,3 +141,10 @@ jobs:
           rm "$RUNNER_TEMP/v1-report/report.html"
           python3 framework-benchmarks/scripts/colocated-suite.py report "$RUNNER_TEMP/v1-report/suite.json"
           cmp "$evidence/report.html" "$RUNNER_TEMP/v1-report/report.html"
+          cmp "$evidence/featured.svg" "$RUNNER_TEMP/v1-report/featured.svg"
+      - name: Upload regenerated archived v1 report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: archived-v1-report-${{ github.run_number }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/v1-report
+          if-no-files-found: error

@@ -1,0 +1,121 @@
+name: JVM Benchmark
+
+on:
+  push:
+    paths:
+      - framework-benchmarks/config-v1.json
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      BENCHMARK_VM: fb-debian-v1
+      BENCHMARK_BUNDLES: /var/tmp/fb-v1-ci
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Set benchmark output directory
+        run: echo "BENCHMARK_OUTPUT=$RUNNER_TEMP/benchmark-results" >> "$GITHUB_ENV"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Enable KVM and install QEMU and Lima
+        run: |
+          test "$(uname -m)" = x86_64
+          test -c /dev/kvm
+          sudo chown "$(id -u)" /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils
+          archive="$RUNNER_TEMP/lima.tar.gz"
+          curl -fLsS --retry 3 https://github.com/lima-vm/lima/releases/download/v2.2.0/lima-2.2.0-Linux-x86_64.tar.gz -o "$archive"
+          printf '%s  %s\n' a0ea1ccf6b7335a900adb5f8d2b8384457965fecb1ba72f09b4e3e46d12f424a "$archive" | sha256sum -c -
+          mkdir "$RUNNER_TEMP/lima"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/lima"
+          echo "$RUNNER_TEMP/lima/bin" >> "$GITHUB_PATH"
+      - name: Build benchmark applications
+        run: |
+          archive="$RUNNER_TEMP/build-jdk.tar.gz"
+          url=https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.4.1%2B1
+          file=OpenJDK25U-jdk_x64_linux_hotspot_25.0.4.1_1.tar.gz
+          curl -fLsS --retry 3 "$url/$file" -o "$archive"
+          digest=$(curl -fLsS --retry 3 "$url/$file.sha256.txt" | cut -d ' ' -f 1)
+          printf '%s  %s\n' "$digest" "$archive" | sha256sum -c -
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          export JAVA_HOME="$RUNNER_TEMP/jdk-25.0.4.1+1"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME/bin" >> "$GITHUB_PATH"
+          mvn --version
+          mvn -B -f market-replay-portfolio/app/pom.xml package
+          mvn -B -f framework-benchmarks/jex-coilbase/pom.xml package
+          mvn -B -f framework-benchmarks/quarkus-coilbase/pom.xml package
+          mvn -B -f framework-benchmarks/micronaut-data-jdbc/pom.xml package
+      - name: Provision the Debian v1 guest
+        run: |
+          mkdir -p "$BENCHMARK_OUTPUT"
+          tools/vm.sh create "$BENCHMARK_VM" framework-benchmarks/vm-linux.yaml
+          tools/vm.sh start "$BENCHMARK_VM"
+          tools/vm.sh exec "$BENCHMARK_VM" lscpu | tee "$BENCHMARK_OUTPUT/guest-cpu.txt"
+          grep -E '^Hypervisor vendor:[[:space:]]+KVM' "$BENCHMARK_OUTPUT/guest-cpu.txt"
+          tools/provision-benchmark-storage.sh "$BENCHMARK_VM"
+          jdk="$RUNNER_TEMP/fb-jdk.tar.gz"
+          curl -fLsS --retry 3 https://download.java.net/java/GA/jdk27/55ce5470a6294008af0057ff4626d0e5/35/GPL/openjdk-27_linux-x64_bin.tar.gz -o "$jdk"
+          printf '%s  %s\n' 95fc37eb3a18a27a26d5904c2d89d52bace8dafa9a078ca27f4747fbc4bf070b "$jdk" | sha256sum -c -
+          tools/vm.sh put "$BENCHMARK_VM" "$jdk" /var/tmp/fb-jdk.tar.gz
+          tools/vm.sh put "$BENCHMARK_VM" framework-benchmarks/scripts /tmp/fb-setup
+          tools/vm.sh exec "$BENCHMARK_VM" sudo bash /tmp/fb-setup/setup-vm.sh
+      - name: Deploy the four candidate bundles
+        run: |
+          bundles="$RUNNER_TEMP/bundles"
+          mkdir -p "$bundles"/{jex-coilbase,quarkus-coilbase,micronaut-data-jdbc}
+          cp -a framework-benchmarks/jex-coilbase/target/{portfolio-jex-coilbase.jar,lib} "$bundles/jex-coilbase/"
+          cp -a framework-benchmarks/quarkus-coilbase/target/quarkus-app "$bundles/quarkus-coilbase/"
+          cp -a framework-benchmarks/micronaut-data-jdbc/target/distribution/. "$bundles/micronaut-data-jdbc/"
+          java -Djarmode=tools -jar market-replay-portfolio/app/target/market-replay-portfolio-0.1.0-SNAPSHOT.jar \
+            extract --destination "$bundles/spring-boot"
+          mv "$bundles/spring-boot/"{market-replay-portfolio-0.1.0-SNAPSHOT,application}.jar
+          for candidate in jex-coilbase quarkus-coilbase spring-boot micronaut-data-jdbc; do
+            cp framework-benchmarks/scripts/colocated-guest.py tools/benchmark-preflight.py "$bundles/$candidate/"
+            tools/prepare.sh "$BENCHMARK_VM" "$bundles/$candidate" "$BENCHMARK_BUNDLES/$candidate" \
+              "$BENCHMARK_OUTPUT/deployment/$candidate"
+          done
+      - name: Verify candidate correctness
+        run: |
+          tools/vm.sh exec "$BENCHMARK_VM" sudo systemctl start postgresql@18-main
+          tools/vm.sh tunnel "$BENCHMARK_VM" 15432 5432 &
+          tunnel=$!
+          trap 'kill "$tunnel" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if pg_isready -q -h 127.0.0.1 -p 15432; then break; fi
+            sleep 1
+          done
+          pg_isready -h 127.0.0.1 -p 15432
+          for candidate in spring quarkus jex micronaut; do
+            args=()
+            if [[ "$candidate" != spring ]]; then args+=("--$candidate"); fi
+            python3 framework-benchmarks/scripts/verify-postgres.py --vm "$BENCHMARK_VM" \
+              --output "$BENCHMARK_OUTPUT/correctness/$candidate" "${args[@]}"
+          done
+          tools/vm.sh exec "$BENCHMARK_VM" sudo systemctl stop postgresql@18-main
+      - name: Run preparation and benchmark measurements
+        run: |
+          suite=(python3 framework-benchmarks/scripts/colocated-suite.py run
+            --vm "$BENCHMARK_VM" --guest-run-root /var/tmp/fb-runs)
+          for candidate in jex-coilbase quarkus-coilbase spring-boot micronaut-data-jdbc; do
+            suite+=(--bundle "$candidate=$BENCHMARK_BUNDLES/$candidate")
+          done
+          "${suite[@]}" --preparation --output "$BENCHMARK_OUTPUT/preparation"
+          "${suite[@]}" --output "$BENCHMARK_OUTPUT/measurement"
+      - name: Upload benchmark results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: benchmark-results-${{ github.run_number }}-${{ github.run_attempt }}
+          path: ${{ env.BENCHMARK_OUTPUT }}
+          if-no-files-found: ignore

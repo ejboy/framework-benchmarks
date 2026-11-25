@@ -4,42 +4,26 @@ Start community experiments in a fork. For controlled measurements, run the
 baseline and variant on the same dedicated host and guest. The
 [accepted Debian 13 report](evidence/debian-v1/report.html) shows the published setup.
 
-## Fork and configure GitHub Actions
+## Run from a GitHub fork
 
 1. Open [PVRLabs/framework-benchmarks](https://github.com/PVRLabs/framework-benchmarks)
-   and click **Fork**. In your fork, open `framework-benchmarks/config-v1.json`,
-   click the pencil icon, edit the `jvm` array, and commit the change.
-2. Open the fork's **Actions** tab and enable workflows if prompted. The only
-   checked-in workflow, [Correctness CI](../.github/workflows/ci.yml), runs on
-   pushes and pull requests using `ubuntu-24.04`. It builds and tests the
-   applications, runs PostgreSQL correctness checks, and regenerates an archived
-   report. Enabling Actions or editing the JSON alone leaves benchmark execution
-   to a separate workflow.
-3. Add a benchmark workflow in your fork, for example
-   `.github/workflows/benchmark.yml`. Set its trigger to `workflow_dispatch`
-   and choose a `runs-on` target with x86-64 Linux, working `/dev/kvm`, QEMU,
-   Lima 2.2+, and OpenSSH. Use a self-hosted runner if a hosted runner lacks
-   KVM access.
-   Reuse the build steps from Correctness CI and add the guest provisioning,
-   storage setup, correctness checks, and four-bundle deployment from the
-   [v1 suite guide](suite-v1.md). Configure the suite command's `--vm`,
-   `--guest-run-root`, and four `--bundle` paths to match that setup. Run
-   preparation first, then run the baseline and variant sequentially in the
-   same job with distinct `--output` directories. Pass a saved copy of the
-   upstream JVM settings via `--config` for the baseline if you edited the
-   fork's default. Set a job timeout that covers setup and both runs. Use
-   `actions/upload-artifact` to upload both complete output directories.
-4. Put the workflow file on the fork's default branch. In **Actions**, select
-   the benchmark workflow, click **Run workflow**, and choose the branch with
-   your JVM settings. Once the run finishes, open its summary and download
-   the archives under **Artifacts**. Extract each archive and open
-   `report.html` alongside `suite.json` and the round directories.
-   [Run a workflow manually](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
-   · [Download workflow artifacts](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/download-workflow-artifacts)
+   and click **Fork**.
+2. Open your fork's **Actions** tab and enable workflows if prompted.
+3. In your fork, open `framework-benchmarks/config-v1.json`, click the pencil
+   icon, edit the `jvm` array, and commit the change in GitHub. A push changing
+   that file triggers the [JVM Benchmark workflow](../.github/workflows/benchmark.yml)
+   on a GitHub-hosted Ubuntu runner. The workflow provisions the Debian guest,
+   checks correctness, and runs the preparation and measurement suites.
+4. Open **Actions → JVM Benchmark** and select your run. The
+   **Run preparation and benchmark measurements** step prints a results table.
+   Under **Artifacts**, download `benchmark-results-<run number>-<attempt>`.
+   Extract the archive and open `measurement/report.html` or
+   `measurement/featured.svg`. Keep the manifest and evidence directories
+   alongside them so the report links work.
 
-GitHub-hosted runs are useful for exploratory comparisons within one job.
-Hardware and host load differ from the dedicated benchmark host, so use
-dedicated hardware for comparisons against the published measurements.
+[Correctness CI](../.github/workflows/ci.yml) runs separately. GitHub-hosted
+measurements are for exploration. Use dedicated hardware for comparisons
+against the published measurements.
 
 ## Try the four community-suggested flags
 
