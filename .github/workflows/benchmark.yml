@@ -1,6 +1,7 @@
 name: JVM Benchmark
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - framework-benchmarks/config-v1.json
