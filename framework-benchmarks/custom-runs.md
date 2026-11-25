@@ -4,7 +4,7 @@ Start community experiments in a fork. For controlled measurements, run the
 baseline and variant on the same dedicated host and guest. The
 [accepted Debian 13 report](evidence/debian-v1/report.html) shows the published setup.
 
-## Run from a GitHub fork
+## Test JVM settings in your fork
 
 1. Open [PVRLabs/framework-benchmarks](https://github.com/PVRLabs/framework-benchmarks)
    and click **Fork**.
@@ -12,18 +12,22 @@ baseline and variant on the same dedicated host and guest. The
 3. In your fork, open `framework-benchmarks/config-v1.json`, click the pencil
    icon, edit the `jvm` array, and commit the change in GitHub. A push changing
    that file triggers the [JVM Benchmark workflow](../.github/workflows/benchmark.yml)
-   on a GitHub-hosted Ubuntu runner. The workflow provisions the Debian guest,
-   checks correctness, and runs the preparation and measurement suites.
+   on a GitHub-hosted Ubuntu runner. If your settings are already committed,
+   choose **Actions → JVM Benchmark → Run workflow** and select their branch.
 4. Open **Actions → JVM Benchmark** and select your run. The
-   **Run preparation and benchmark measurements** step prints a results table.
+   **Run preparation and benchmark measurements** step prints a short
+   preparation summary first and the fresh benchmark results after measurement.
+   Use the preparation summary to check that the JVM starts with your settings.
    Under **Artifacts**, download `benchmark-results-<run number>-<attempt>`.
    Extract the archive and open `measurement/report.html` or
    `measurement/featured.svg`. Keep the manifest and evidence directories
    alongside them so the report links work.
 
-[Correctness CI](../.github/workflows/ci.yml) runs separately. GitHub-hosted
-measurements are for exploration. Use dedicated hardware for comparisons
-against the published measurements.
+The eight measured runs spend about 49 minutes in the scheduled phases, plus
+time for setup, preparation, startup, and artifact upload. **Correctness CI**
+runs separately and produces no fresh performance measurements. Use GitHub-hosted
+results to explore a JVM change and dedicated hardware to compare against the
+published measurements.
 
 ## Try the four community-suggested flags
 
